@@ -48,7 +48,7 @@ const App: React.FC = () => {
   const [employeeList, setEmployeeList] = useState(loadFromStorage('employeeList', EMPLOYEE_DATABASE));
   const [sectionWeights, setSectionWeights] = useState(loadFromStorage('sectionWeights', { part1: 50, part2: 20, part3: 30 }));
   const [users, setUsers] = useState<User[]>(loadFromStorage('users', [
-    { username: 'admin', password: 'admin', role: 'admin', allowedDepartments: ['ALL'] }
+    { username: 'admin', password: 'admin', role: 'admin', allowedDepartments: ['ALL'], allowedPositions: ['ALL'] }
   ]));
 
   // --- App State ---
