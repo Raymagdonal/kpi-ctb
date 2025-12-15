@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { X, Save, Plus, Trash2, User as UserIcon, Shield, Check, AlertCircle } from 'lucide-react';
 import { EmployeeData, User } from '../types';
+import { POSITION_KPI_MAP } from '../constants';
 
 interface Props {
   isOpen: boolean;
@@ -91,13 +92,19 @@ const AdminSettings: React.FC<Props> = ({
     username: '',
     password: '',
     role: 'user',
-    allowedDepartments: []
+    allowedDepartments: [],
+    allowedPositions: []
   });
 
   // Derive unique departments from employee list for permissions
   const allDepartments = useMemo(() => {
     return Array.from(new Set(localEmployees.map(e => e.jobType).filter(Boolean)));
   }, [localEmployees]);
+
+  // Derive unique positions from POSITION_KPI_MAP
+  const allPositions = useMemo(() => {
+    return Object.keys(POSITION_KPI_MAP);
+  }, []);
 
   if (!isOpen) return null;
 
@@ -154,13 +161,36 @@ const AdminSettings: React.FC<Props> = ({
     setLocalUsers(updated);
   };
 
+  const toggleUserPositionPermission = (index: number, position: string) => {
+    const updated = [...localUsers];
+    const user = updated[index];
+    
+    if (!user.allowedPositions) user.allowedPositions = [];
+    
+    if (position === 'ALL') {
+       if (user.allowedPositions.includes('ALL')) {
+           user.allowedPositions = []; 
+       } else {
+           user.allowedPositions = ['ALL']; 
+       }
+    } else {
+        if (user.allowedPositions.includes(position)) {
+            user.allowedPositions = user.allowedPositions.filter(p => p !== position);
+        } else {
+            user.allowedPositions = [...user.allowedPositions.filter(p => p !== 'ALL'), position];
+        }
+    }
+    setLocalUsers(updated);
+  };
+
   // --- Add User Modal Logic ---
   const startAddUser = () => {
     setNewUser({
       username: '',
       password: '',
       role: 'user',
-      allowedDepartments: []
+      allowedDepartments: [],
+      allowedPositions: []
     });
     setShowAddUserModal(true);
   };
@@ -182,6 +212,24 @@ const AdminSettings: React.FC<Props> = ({
         }
     }
     setNewUser({ ...newUser, allowedDepartments: updatedDepts });
+  };
+
+  const toggleNewUserPositionPermission = (position: string) => {
+    let updatedPositions = [...newUser.allowedPositions!];
+    if (position === 'ALL') {
+       if (updatedPositions.includes('ALL')) {
+           updatedPositions = []; 
+       } else {
+           updatedPositions = ['ALL']; 
+       }
+    } else {
+        if (updatedPositions.includes(position)) {
+            updatedPositions = updatedPositions.filter(p => p !== position);
+        } else {
+            updatedPositions = [...updatedPositions.filter(p => p !== 'ALL'), position];
+        }
+    }
+    setNewUser({ ...newUser, allowedPositions: updatedPositions });
   };
 
   const confirmAddUser = () => {
@@ -407,6 +455,38 @@ const AdminSettings: React.FC<Props> = ({
                                 </div>
                               )}
                           </div>
+
+                          {/* Position Permissions */}
+                          <div className="space-y-2">
+                            <label className="text-sm font-bold text-gray-700">สิทธิ์การประเมินตำแหน่ง</label>
+                            <div className="p-3 bg-gray-50 rounded-lg border border-gray-200">
+                                {user.allowedPositions && user.allowedPositions.includes('ALL') ? (
+                                  <div className="text-green-700 font-medium text-sm flex items-center gap-2">
+                                      <Check size={16} /> ผู้ใช้งานนี้เป็น Admin สามารถประเมินได้ทุกตำแหน่ง
+                                  </div>
+                                ) : (
+                                  <div className="flex flex-wrap gap-2">
+                                      {allPositions.map((position) => {
+                                        const isSelected = user.allowedPositions && user.allowedPositions.includes(position);
+                                        return (
+                                            <button
+                                              key={position}
+                                              onClick={() => toggleUserPositionPermission(idx, position)}
+                                              className={`px-3 py-1.5 rounded text-xs font-medium transition-all border select-none ${
+                                                  isSelected
+                                                  ? 'bg-blue-100 text-blue-800 border-blue-300 shadow-sm'
+                                                  : 'bg-white text-black border-gray-300 hover:border-gray-400'
+                                              }`}
+                                            >
+                                              {position}
+                                            </button>
+                                        );
+                                      })}
+                                      {allPositions.length === 0 && <span className="text-gray-500 text-sm italic">ไม่มีข้อมูลตำแหน่งในระบบ</span>}
+                                  </div>
+                                )}
+                            </div>
+                          </div>
                         </div>
                       </div>
 
@@ -587,6 +667,53 @@ const AdminSettings: React.FC<Props> = ({
                     </div>
                  )}
                  <p className="text-xs text-gray-500 mt-2">* เลือกแผนกที่ต้องการให้ผู้ใช้งานนี้มองเห็นและจัดการได้</p>
+              </div>
+
+              {/* Position Permissions */}
+              <div className="space-y-3">
+                 <label className="block text-sm font-bold text-gray-700">สิทธิ์การประเมินตำแหน่ง</label>
+                 <div className="flex gap-2">
+                    <button
+                      onClick={() => toggleNewUserPositionPermission('ALL')}
+                      className={`px-4 py-2 rounded-lg font-medium border transition-all ${
+                        newUser.allowedPositions!.includes('ALL') 
+                        ? 'bg-green-100 text-green-800 border-green-300'
+                        : 'bg-white text-gray-500 border-gray-300 hover:border-green-500'
+                      }`}
+                    >
+                      เข้าถึงทุกตำแหน่ง (Admin)
+                    </button>
+                 </div>
+                 
+                 {newUser.allowedPositions!.includes('ALL') ? (
+                    <div className="p-4 bg-green-50 text-green-800 rounded-lg flex items-center justify-center gap-2 font-bold text-sm">
+                      <Check size={18} /> ผู้ใช้งานนี้จะเป็น Admin (เห็นข้อมูลทั้งหมด)
+                    </div>
+                 ) : (
+                    <div className="flex flex-wrap gap-2 p-4 bg-gray-50 rounded-lg border border-gray-200">
+                      {allPositions.length > 0 ? allPositions.map((position) => {
+                          const isSelected = newUser.allowedPositions!.includes(position);
+                          return (
+                              <button
+                                key={position}
+                                onClick={() => toggleNewUserPositionPermission(position)}
+                                className={`px-3 py-1.5 rounded text-sm font-medium transition-all border ${
+                                    isSelected
+                                    ? 'bg-blue-100 text-blue-800 border-blue-300'
+                                    : 'bg-white text-gray-600 border-gray-300 hover:border-gray-400'
+                                }`}
+                              >
+                                {position}
+                              </button>
+                          );
+                      }) : (
+                        <div className="text-gray-400 text-sm italic w-full text-center py-2 flex items-center justify-center gap-2">
+                           <AlertCircle size={16} /> ไม่มีข้อมูลตำแหน่งในระบบ
+                        </div>
+                      )}
+                    </div>
+                 )}
+                 <p className="text-xs text-gray-500 mt-2">* เลือกตำแหน่งที่ต้องการให้ผู้ใช้งานนี้ประเมินได้</p>
               </div>
             </div>
 
