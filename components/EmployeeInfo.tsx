@@ -40,6 +40,10 @@ const EmployeeInfo: React.FC<Props> = ({ data, onChange, hideSearch = false, emp
     if (currentUser && currentUser.allowedDepartments.length === 1 && currentUser.allowedDepartments[0] === 'ฝ่ายปฏิบัติการ') {
       filtered = filtered.filter(emp => !forbiddenIds.includes(emp.id));
     }
+    // Filter by allowed positions
+    if (currentUser && currentUser.allowedPositions && !currentUser.allowedPositions.includes('ALL')) {
+      filtered = filtered.filter(emp => currentUser.allowedPositions!.includes(emp.position));
+    }
     return filtered;
   }, [data.jobType, employeeList, currentUser, forbiddenIds]);
 
@@ -83,6 +87,10 @@ const EmployeeInfo: React.FC<Props> = ({ data, onChange, hideSearch = false, emp
 
     // Hide forbidden employees for users with only 'ฝ่ายปฏิบัติการ' permissions
     if (currentUser && currentUser.allowedDepartments.length === 1 && currentUser.allowedDepartments[0] === 'ฝ่ายปฏิบัติการ' && forbiddenIds.includes(emp.id)) return false;
+
+    // Check position permission
+    const hasPositionPermission = !currentUser || !currentUser.allowedPositions || currentUser.allowedPositions.includes('ALL') || currentUser.allowedPositions.includes(emp.position);
+    if (!hasPositionPermission) return false;
 
     return emp.id.toLowerCase().includes(searchTerm.toLowerCase()) || 
            emp.name.toLowerCase().includes(searchTerm.toLowerCase());
