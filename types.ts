@@ -52,4 +52,5 @@ export interface User {
   password?: string;
   role: 'admin' | 'user';
   allowedDepartments: string[]; // 'ALL' or specific departments
+  allowedPositions?: string[]; // 'ALL' or specific positions
 }
