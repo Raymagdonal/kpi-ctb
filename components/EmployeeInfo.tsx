@@ -8,9 +8,10 @@ interface Props {
   hideSearch?: boolean;
   employeeList: any[];
   currentUser?: User; // Pass current user for permission check
+  forbiddenIds?: string[];
 }
 
-const EmployeeInfo: React.FC<Props> = ({ data, onChange, hideSearch = false, employeeList, currentUser }) => {
+const EmployeeInfo: React.FC<Props> = ({ data, onChange, hideSearch = false, employeeList, currentUser, forbiddenIds = [] }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [showSearchDropdown, setShowSearchDropdown] = useState(false);
   const searchRef = useRef<HTMLDivElement>(null);
@@ -34,8 +35,13 @@ const EmployeeInfo: React.FC<Props> = ({ data, onChange, hideSearch = false, emp
   // Filter employees based on selected Department (JobType)
   const availableEmployees = useMemo(() => {
     if (!data.jobType) return [];
-    return employeeList.filter(emp => emp.jobType === data.jobType);
-  }, [data.jobType, employeeList]);
+    let filtered = employeeList.filter(emp => emp.jobType === data.jobType);
+    // Hide forbidden employees for users with only 'ฝ่ายปฏิบัติการ' permissions
+    if (currentUser && currentUser.allowedDepartments.length === 1 && currentUser.allowedDepartments[0] === 'ฝ่ายปฏิบัติการ') {
+      filtered = filtered.filter(emp => !forbiddenIds.includes(emp.id));
+    }
+    return filtered;
+  }, [data.jobType, employeeList, currentUser, forbiddenIds]);
 
   // Helper to update all fields
   const updateEmployeeFields = (emp: any) => {
@@ -74,6 +80,9 @@ const EmployeeInfo: React.FC<Props> = ({ data, onChange, hideSearch = false, emp
     // Check permission first
     const hasPermission = !currentUser || currentUser.role === 'admin' || currentUser.allowedDepartments.includes('ALL') || currentUser.allowedDepartments.includes(emp.jobType);
     if (!hasPermission) return false;
+
+    // Hide forbidden employees for users with only 'ฝ่ายปฏิบัติการ' permissions
+    if (currentUser && currentUser.allowedDepartments.length === 1 && currentUser.allowedDepartments[0] === 'ฝ่ายปฏิบัติการ' && forbiddenIds.includes(emp.id)) return false;
 
     return emp.id.toLowerCase().includes(searchTerm.toLowerCase()) || 
            emp.name.toLowerCase().includes(searchTerm.toLowerCase());
