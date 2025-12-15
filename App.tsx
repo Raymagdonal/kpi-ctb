@@ -18,6 +18,8 @@ declare global {
   }
 }
 
+const forbiddenIds = ['226002', '226005', '226006', '226007'];
+
 const App: React.FC = () => {
   // --- Auth State ---
   const [isLoggedIn, setIsLoggedIn] = useState(false);
@@ -122,17 +124,25 @@ const App: React.FC = () => {
 
   const handleScoreChange = (itemId: string, val: number) => {
     if (isLocked) return;
+    if (forbiddenIds.includes(employee.id) && currentUser && currentUser.allowedDepartments.length === 1 && currentUser.allowedDepartments[0] === 'ฝ่ายปฏิบัติการ') return;
     setScores(prev => ({ ...prev, [itemId]: val }));
   };
 
   const handleCommentChange = (itemId: string, val: string) => {
     if (isLocked) return;
+    if (forbiddenIds.includes(employee.id) && currentUser && currentUser.allowedDepartments.length === 1 && currentUser.allowedDepartments[0] === 'ฝ่ายปฏิบัติการ') return;
     setComments(prev => ({ ...prev, [itemId]: val }));
   };
 
   const handleAttendanceChange = (field: keyof AttendanceState, value: number) => {
     if (isLocked) return;
+    if (forbiddenIds.includes(employee.id) && currentUser && currentUser.allowedDepartments.length === 1 && currentUser.allowedDepartments[0] === 'ฝ่ายปฏิบัติการ') return;
     setAttendance(prev => ({ ...prev, [field]: value }));
+  };
+
+  const handleFeedbackChange = (value: string) => {
+    if (forbiddenIds.includes(employee.id) && currentUser && currentUser.allowedDepartments.length === 1 && currentUser.allowedDepartments[0] === 'ฝ่ายปฏิบัติการ') return;
+    setFeedback(value);
   };
 
   const toggleLock = () => {
@@ -230,6 +240,7 @@ const App: React.FC = () => {
               hideSearch={isPdfGenerating} 
               employeeList={employeeList} 
               currentUser={currentUser} // Pass currentUser to filter visible departments
+              forbiddenIds={forbiddenIds}
             />
           </div>
 
@@ -358,7 +369,7 @@ const App: React.FC = () => {
                         {section.id === 'part-4' && (
                           <FeedbackSection 
                             value={feedback}
-                            onChange={setFeedback}
+                            onChange={handleFeedbackChange}
                             isLocked={isLocked}
                           />
                         )}
