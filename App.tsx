@@ -18,6 +18,24 @@ declare global {
   }
 }
 
+// Helper functions for localStorage
+const loadFromStorage = (key: string, defaultValue: any) => {
+  try {
+    const item = localStorage.getItem(key);
+    return item ? JSON.parse(item) : defaultValue;
+  } catch {
+    return defaultValue;
+  }
+};
+
+const saveToStorage = (key: string, value: any) => {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch (error) {
+    console.error('Failed to save to localStorage:', error);
+  }
+};
+
 const forbiddenIds = ['226002', '226005', '226006', '226007'];
 
 const App: React.FC = () => {
@@ -27,24 +45,24 @@ const App: React.FC = () => {
   const [showAdminPanel, setShowAdminPanel] = useState(false);
 
   // --- Dynamic Data State ---
-  const [employeeList, setEmployeeList] = useState(EMPLOYEE_DATABASE);
-  const [sectionWeights, setSectionWeights] = useState({ part1: 50, part2: 20, part3: 30 });
-  const [users, setUsers] = useState<User[]>([
+  const [employeeList, setEmployeeList] = useState(loadFromStorage('employeeList', EMPLOYEE_DATABASE));
+  const [sectionWeights, setSectionWeights] = useState(loadFromStorage('sectionWeights', { part1: 50, part2: 20, part3: 30 }));
+  const [users, setUsers] = useState<User[]>(loadFromStorage('users', [
     { username: 'admin', password: 'admin', role: 'admin', allowedDepartments: ['ALL'] }
-  ]);
+  ]));
 
   // --- App State ---
   const [currentSectionIndex, setCurrentSectionIndex] = useState(0);
   const [isLocked, setIsLocked] = useState(false);
   const [isPdfGenerating, setIsPdfGenerating] = useState(false);
-  const [employee, setEmployee] = useState<EmployeeData>({
+  const [employee, setEmployee] = useState<EmployeeData>(loadFromStorage('employee', {
     id: '',
     name: '',
     jobType: '',
     position: '',
     department: '',
     date: '15 ธันวาคม 2568'
-  });
+  }));
 
   const [scores, setScores] = useState<ScoreState>({});
   const [comments, setComments] = useState<CommentState>({});
@@ -54,6 +72,61 @@ const App: React.FC = () => {
     verbalWarning: 0, writtenWarning: 0, suspension: 0
   });
   const [feedback, setFeedback] = useState<string>("");
+
+  // Load employee-specific data when employee changes
+  useEffect(() => {
+    if (employee.id) {
+      setScores(loadFromStorage(`scores_${employee.id}`, {}));
+      setComments(loadFromStorage(`comments_${employee.id}`, {}));
+      setAttendance(loadFromStorage(`attendance_${employee.id}`, {
+        sickLeave: 0, personalLeave: 0, absent: 0, late: 0,
+        maternityLeave: 0, ordinationLeave: 0,
+        verbalWarning: 0, writtenWarning: 0, suspension: 0
+      }));
+      setFeedback(loadFromStorage(`feedback_${employee.id}`, ""));
+    }
+  }, [employee.id]);
+
+  // Save data to localStorage
+  useEffect(() => {
+    saveToStorage('users', users);
+  }, [users]);
+
+  useEffect(() => {
+    saveToStorage('employeeList', employeeList);
+  }, [employeeList]);
+
+  useEffect(() => {
+    saveToStorage('sectionWeights', sectionWeights);
+  }, [sectionWeights]);
+
+  useEffect(() => {
+    saveToStorage('employee', employee);
+  }, [employee]);
+
+  useEffect(() => {
+    if (employee.id) {
+      saveToStorage(`scores_${employee.id}`, scores);
+    }
+  }, [scores, employee.id]);
+
+  useEffect(() => {
+    if (employee.id) {
+      saveToStorage(`comments_${employee.id}`, comments);
+    }
+  }, [comments, employee.id]);
+
+  useEffect(() => {
+    if (employee.id) {
+      saveToStorage(`attendance_${employee.id}`, attendance);
+    }
+  }, [attendance, employee.id]);
+
+  useEffect(() => {
+    if (employee.id) {
+      saveToStorage(`feedback_${employee.id}`, feedback);
+    }
+  }, [feedback, employee.id]);
 
   // --- Derived Data ---
   const currentKPIData: KPISectionData[] = useMemo(() => {
@@ -86,38 +159,12 @@ const App: React.FC = () => {
   const handleLogout = () => {
     setIsLoggedIn(false);
     setCurrentUser(undefined);
-    // Reset form state to avoid seeing previous data on re-login
-    setEmployee({
-      id: '',
-      name: '',
-      jobType: '',
-      position: '',
-      department: '',
-      date: '15 ธันวาคม 2568'
-    });
-    setScores({});
-    setComments({});
-    setAttendance({
-      sickLeave: 0, personalLeave: 0, absent: 0, late: 0,
-      maternityLeave: 0, ordinationLeave: 0,
-      verbalWarning: 0, writtenWarning: 0, suspension: 0
-    });
-    setFeedback("");
-    setCurrentSectionIndex(0);
     setIsLocked(false);
   };
 
   const handleEmployeeChange = (field: keyof EmployeeData, value: string) => {
     setEmployee(prev => ({ ...prev, [field]: value }));
     if (field === 'position') {
-      setScores({});
-      setComments({});
-      setAttendance({
-        sickLeave: 0, personalLeave: 0, absent: 0, late: 0, 
-        maternityLeave: 0, ordinationLeave: 0, 
-        verbalWarning: 0, writtenWarning: 0, suspension: 0
-      });
-      setFeedback("");
       setCurrentSectionIndex(0);
     }
   };
