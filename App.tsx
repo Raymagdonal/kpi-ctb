@@ -18,25 +18,15 @@ declare global {
   }
 }
 
-// Helper functions for localStorage
-const loadFromStorage = (key: string, defaultValue: any) => {
-  try {
-    const item = localStorage.getItem(key);
-    return item ? JSON.parse(item) : defaultValue;
-  } catch {
-    return defaultValue;
-  }
-};
-
-const saveToStorage = (key: string, value: any) => {
-  try {
-    localStorage.setItem(key, JSON.stringify(value));
-  } catch (error) {
-    console.error('Failed to save to localStorage:', error);
-  }
-};
-
-const forbiddenIds = ['226002', '226005', '226006', '226007'];
+// Define structure for saved evaluation data
+interface EvaluationRecord {
+  scores: ScoreState;
+  comments: CommentState;
+  attendance: AttendanceState;
+  feedback: string;
+  isLocked: boolean;
+  lastUpdated: string;
+}
 
 const App: React.FC = () => {
   // --- Auth State ---
@@ -44,25 +34,79 @@ const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<User | undefined>(undefined);
   const [showAdminPanel, setShowAdminPanel] = useState(false);
 
-  // --- Dynamic Data State ---
-  const [employeeList, setEmployeeList] = useState(loadFromStorage('employeeList', EMPLOYEE_DATABASE));
-  const [sectionWeights, setSectionWeights] = useState(loadFromStorage('sectionWeights', { part1: 50, part2: 20, part3: 30 }));
-  const [users, setUsers] = useState<User[]>(loadFromStorage('users', [
-    { username: 'admin', password: 'admin', role: 'admin', allowedDepartments: ['ALL'], allowedPositions: ['ALL'] }
-  ]));
+  // --- Dynamic Data State with LocalStorage Persistence ---
+  
+  // 1. Employees
+  const [employeeList, setEmployeeList] = useState<any[]>(() => {
+    try {
+      const saved = localStorage.getItem('kpi_employees');
+      return saved ? JSON.parse(saved) : EMPLOYEE_DATABASE;
+    } catch (e) {
+      return EMPLOYEE_DATABASE;
+    }
+  });
+
+  // 2. Weights
+  const [sectionWeights, setSectionWeights] = useState(() => {
+    try {
+      const saved = localStorage.getItem('kpi_weights');
+      return saved ? JSON.parse(saved) : { part1: 50, part2: 20, part3: 30 };
+    } catch (e) {
+      return { part1: 50, part2: 20, part3: 30 };
+    }
+  });
+
+  // 3. Users
+  const [users, setUsers] = useState<User[]>(() => {
+    try {
+      const saved = localStorage.getItem('kpi_users');
+      return saved ? JSON.parse(saved) : [
+        { username: 'admin', password: 'admin', role: 'admin', allowedDepartments: ['ALL'] }
+      ];
+    } catch (e) {
+      return [{ username: 'admin', password: 'admin', role: 'admin', allowedDepartments: ['ALL'] }];
+    }
+  });
+
+  // 4. All Evaluations (Database of scores)
+  const [allEvaluations, setAllEvaluations] = useState<Record<string, EvaluationRecord>>(() => {
+    try {
+      const saved = localStorage.getItem('kpi_evaluations');
+      return saved ? JSON.parse(saved) : {};
+    } catch (e) {
+      return {};
+    }
+  });
+
+  // --- Persistence Effects ---
+  useEffect(() => {
+    localStorage.setItem('kpi_employees', JSON.stringify(employeeList));
+  }, [employeeList]);
+
+  useEffect(() => {
+    localStorage.setItem('kpi_weights', JSON.stringify(sectionWeights));
+  }, [sectionWeights]);
+
+  useEffect(() => {
+    localStorage.setItem('kpi_users', JSON.stringify(users));
+  }, [users]);
+
+  useEffect(() => {
+    localStorage.setItem('kpi_evaluations', JSON.stringify(allEvaluations));
+  }, [allEvaluations]);
 
   // --- App State ---
   const [currentSectionIndex, setCurrentSectionIndex] = useState(0);
   const [isLocked, setIsLocked] = useState(false);
   const [isPdfGenerating, setIsPdfGenerating] = useState(false);
-  const [employee, setEmployee] = useState<EmployeeData>(loadFromStorage('employee', {
+  const [employee, setEmployee] = useState<EmployeeData>({
     id: '',
     name: '',
     jobType: '',
     position: '',
     department: '',
     date: '15 ธันวาคม 2568'
-  }));
+  });
 
   const [scores, setScores] = useState<ScoreState>({});
   const [comments, setComments] = useState<CommentState>({});
@@ -73,73 +117,14 @@ const App: React.FC = () => {
   });
   const [feedback, setFeedback] = useState<string>("");
 
-  // Load employee-specific data when employee changes
-  useEffect(() => {
-    if (employee.id) {
-      setScores(loadFromStorage(`scores_${employee.id}`, {}));
-      setComments(loadFromStorage(`comments_${employee.id}`, {}));
-      setAttendance(loadFromStorage(`attendance_${employee.id}`, {
-        sickLeave: 0, personalLeave: 0, absent: 0, late: 0,
-        maternityLeave: 0, ordinationLeave: 0,
-        verbalWarning: 0, writtenWarning: 0, suspension: 0
-      }));
-      setFeedback(loadFromStorage(`feedback_${employee.id}`, ""));
-    }
-  }, [employee.id]);
-
-  // Save data to localStorage
-  useEffect(() => {
-    saveToStorage('users', users);
-  }, [users]);
-
-  useEffect(() => {
-    saveToStorage('employeeList', employeeList);
-  }, [employeeList]);
-
-  useEffect(() => {
-    saveToStorage('sectionWeights', sectionWeights);
-  }, [sectionWeights]);
-
-  useEffect(() => {
-    saveToStorage('employee', employee);
-  }, [employee]);
-
-  useEffect(() => {
-    if (employee.id) {
-      saveToStorage(`scores_${employee.id}`, scores);
-    }
-  }, [scores, employee.id]);
-
-  useEffect(() => {
-    if (employee.id) {
-      saveToStorage(`comments_${employee.id}`, comments);
-    }
-  }, [comments, employee.id]);
-
-  useEffect(() => {
-    if (employee.id) {
-      saveToStorage(`attendance_${employee.id}`, attendance);
-    }
-  }, [attendance, employee.id]);
-
-  useEffect(() => {
-    if (employee.id) {
-      saveToStorage(`feedback_${employee.id}`, feedback);
-    }
-  }, [feedback, employee.id]);
-
   // --- Derived Data ---
   const currentKPIData: KPISectionData[] = useMemo(() => {
-    // Clone the template based on position, defaulting to standard if not found
     const template = POSITION_KPI_MAP[employee.position] || DEFAULT_KPI_DATA;
-    
-    // Apply dynamic weights from state
     return template.map(section => {
       let newWeight = section.sectionWeight;
       if (section.id === 'part-1') newWeight = sectionWeights.part1;
       if (section.id === 'part-2') newWeight = sectionWeights.part2;
       if (section.id === 'part-3') newWeight = sectionWeights.part3;
-      // Keep Part 4 (Feedback) as 0 or whatever it was
       return { ...section, sectionWeight: newWeight };
     });
   }, [employee.position, sectionWeights]);
@@ -150,6 +135,24 @@ const App: React.FC = () => {
     }
   }, [currentKPIData, currentSectionIndex]);
 
+  // --- Auto-Save Logic ---
+  // Whenever scores/comments/etc change, update the central 'allEvaluations' database for the current employee
+  useEffect(() => {
+    if (employee.id && employee.name) {
+      setAllEvaluations(prev => ({
+        ...prev,
+        [employee.id]: {
+          scores,
+          comments,
+          attendance,
+          feedback,
+          isLocked,
+          lastUpdated: new Date().toISOString()
+        }
+      }));
+    }
+  }, [scores, comments, attendance, feedback, isLocked, employee.id]);
+
   // --- Handlers ---
   const handleLoginSuccess = (user: User) => {
     setCurrentUser(user);
@@ -159,37 +162,84 @@ const App: React.FC = () => {
   const handleLogout = () => {
     setIsLoggedIn(false);
     setCurrentUser(undefined);
+    resetForm();
+  };
+
+  const resetForm = () => {
+    setEmployee({
+      id: '',
+      name: '',
+      jobType: '',
+      position: '',
+      department: '',
+      date: '15 ธันวาคม 2568'
+    });
+    setScores({});
+    setComments({});
+    setAttendance({
+      sickLeave: 0, personalLeave: 0, absent: 0, late: 0,
+      maternityLeave: 0, ordinationLeave: 0,
+      verbalWarning: 0, writtenWarning: 0, suspension: 0
+    });
+    setFeedback("");
+    setCurrentSectionIndex(0);
     setIsLocked(false);
   };
 
-  const handleEmployeeChange = (field: keyof EmployeeData, value: string) => {
-    setEmployee(prev => ({ ...prev, [field]: value }));
-    if (field === 'position') {
-      setCurrentSectionIndex(0);
+  const loadEmployeeData = (empId: string) => {
+    const savedData = allEvaluations[empId];
+    if (savedData) {
+      setScores(savedData.scores || {});
+      setComments(savedData.comments || {});
+      setAttendance(savedData.attendance || {
+        sickLeave: 0, personalLeave: 0, absent: 0, late: 0,
+        maternityLeave: 0, ordinationLeave: 0,
+        verbalWarning: 0, writtenWarning: 0, suspension: 0
+      });
+      setFeedback(savedData.feedback || "");
+      setIsLocked(savedData.isLocked || false);
+    } else {
+      // Reset if no saved data found for this ID
+      setScores({});
+      setComments({});
+      setAttendance({
+        sickLeave: 0, personalLeave: 0, absent: 0, late: 0,
+        maternityLeave: 0, ordinationLeave: 0,
+        verbalWarning: 0, writtenWarning: 0, suspension: 0
+      });
+      setFeedback("");
+      setIsLocked(false);
     }
+  };
+
+  const handleEmployeeChange = (field: keyof EmployeeData, value: string) => {
+    // If changing ID (switching employee), load their data
+    if (field === 'id') {
+      loadEmployeeData(value);
+    } else if (field === 'position') {
+       // Only reset section index if position changes significantly, 
+       // but wait, if we are loading an existing employee, we shouldn't wipe data.
+       // The 'id' change usually triggers the load.
+       // We'll keep index reset for UX but data is controlled by loadEmployeeData
+       setCurrentSectionIndex(0);
+    }
+
+    setEmployee(prev => ({ ...prev, [field]: value }));
   };
 
   const handleScoreChange = (itemId: string, val: number) => {
     if (isLocked) return;
-    if (forbiddenIds.includes(employee.id) && currentUser && currentUser.allowedDepartments.length === 1 && currentUser.allowedDepartments[0] === 'ฝ่ายปฏิบัติการ') return;
     setScores(prev => ({ ...prev, [itemId]: val }));
   };
 
   const handleCommentChange = (itemId: string, val: string) => {
     if (isLocked) return;
-    if (forbiddenIds.includes(employee.id) && currentUser && currentUser.allowedDepartments.length === 1 && currentUser.allowedDepartments[0] === 'ฝ่ายปฏิบัติการ') return;
     setComments(prev => ({ ...prev, [itemId]: val }));
   };
 
   const handleAttendanceChange = (field: keyof AttendanceState, value: number) => {
     if (isLocked) return;
-    if (forbiddenIds.includes(employee.id) && currentUser && currentUser.allowedDepartments.length === 1 && currentUser.allowedDepartments[0] === 'ฝ่ายปฏิบัติการ') return;
     setAttendance(prev => ({ ...prev, [field]: value }));
-  };
-
-  const handleFeedbackChange = (value: string) => {
-    if (forbiddenIds.includes(employee.id) && currentUser && currentUser.allowedDepartments.length === 1 && currentUser.allowedDepartments[0] === 'ฝ่ายปฏิบัติการ') return;
-    setFeedback(value);
   };
 
   const toggleLock = () => {
@@ -286,8 +336,7 @@ const App: React.FC = () => {
               onChange={handleEmployeeChange} 
               hideSearch={isPdfGenerating} 
               employeeList={employeeList} 
-              currentUser={currentUser} // Pass currentUser to filter visible departments
-              forbiddenIds={forbiddenIds}
+              currentUser={currentUser}
             />
           </div>
 
@@ -416,7 +465,7 @@ const App: React.FC = () => {
                         {section.id === 'part-4' && (
                           <FeedbackSection 
                             value={feedback}
-                            onChange={handleFeedbackChange}
+                            onChange={setFeedback}
                             isLocked={isLocked}
                           />
                         )}
@@ -524,6 +573,8 @@ const App: React.FC = () => {
         setSectionWeights={setSectionWeights}
         users={users}
         setUsers={setUsers}
+        evaluations={allEvaluations} // Pass evaluations to Admin for export
+        setEvaluations={setAllEvaluations} // Pass setter for import
       />
     </div>
   );
