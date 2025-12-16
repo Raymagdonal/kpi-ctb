@@ -1,7 +1,6 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
-import { X, Save, Plus, Trash2, User as UserIcon, Shield, Check, AlertCircle } from 'lucide-react';
-import { EmployeeData, User } from '../types';
-import { POSITION_KPI_MAP } from '../constants';
+import { X, Save, Plus, Trash2, User as UserIcon, Shield, Check, RefreshCw, Download, Upload, FileJson, Briefcase } from 'lucide-react';
+import { User } from '../types';
 
 interface Props {
   isOpen: boolean;
@@ -12,14 +11,18 @@ interface Props {
   setSectionWeights: (weights: { part1: number; part2: number; part3: number }) => void;
   users: User[];
   setUsers: (users: User[]) => void;
+  evaluations: Record<string, any>;
+  setEvaluations: (data: Record<string, any>) => void;
 }
 
-// Custom Button Component for Long Press Action (5 Seconds)
+// --- Internal Components ---
+
+// Custom Button Component for Long Press Action
 const LongPressDeleteButton = ({ onClick, disabled = false, label }: { onClick: () => void, disabled?: boolean, label?: React.ReactNode }) => {
   const [pressing, setPressing] = useState(false);
   const [progress, setProgress] = useState(0);
   const intervalRef = useRef<number | null>(null);
-  const DURATION = 5000; // 5 Seconds
+  const DURATION = 2000; // 2 Seconds for better UX
 
   const start = (e: React.MouseEvent | React.TouchEvent) => {
     if (disabled) return;
@@ -59,7 +62,7 @@ const LongPressDeleteButton = ({ onClick, disabled = false, label }: { onClick: 
           ? 'text-gray-300 cursor-not-allowed' 
           : 'text-red-600 hover:bg-red-50'
       } ${label ? 'px-3 py-1.5 rounded flex items-center gap-1 text-xs font-bold border border-transparent' : 'p-1 rounded'}`}
-      title="กดค้างไว้ 5 วินาทีเพื่อลบข้อมูล"
+      title="กดค้างไว้ 2 วินาทีเพื่อลบข้อมูล"
     >
       {/* Background fill progress */}
       <div 
@@ -72,16 +75,82 @@ const LongPressDeleteButton = ({ onClick, disabled = false, label }: { onClick: 
       <div className="relative z-10 flex items-center gap-1">
         <Trash2 size={label ? 14 : 16} />
         {label}
-        {pressing && <span className="text-[10px] ml-1 font-normal">({((DURATION - (progress/100 * DURATION))/1000).toFixed(1)}s)</span>}
       </div>
     </button>
   );
 };
 
-const AdminSettings: React.FC<Props> = ({ 
-  isOpen, onClose, employees, setEmployees, sectionWeights, setSectionWeights, users, setUsers
+// Permission Selector Component (Tags + Add Dropdown)
+const PermissionSelector = ({ 
+  selected, 
+  options, 
+  onAdd, 
+  onRemove, 
+  tagColorClass,
+  btnColorClass,
+  btnLabel
+}: {
+  selected: string[],
+  options: string[],
+  onAdd: (val: string) => void,
+  onRemove: (val: string) => void,
+  tagColorClass: string,
+  btnColorClass: string,
+  btnLabel: string
 }) => {
-  const [activeTab, setActiveTab] = useState<'employees' | 'weights' | 'users'>('employees');
+  const availableOptions = options.filter(o => !selected.includes(o));
+  
+  return (
+    <div className="flex flex-col items-start gap-2 w-full">
+      {/* Selected Tags */}
+      {selected.length > 0 && (
+          <div className="flex flex-wrap gap-2 mb-1 w-full">
+            {selected.map((item) => (
+              <span key={item} className={`px-2 py-1 rounded text-xs font-bold flex items-center gap-1 border shadow-sm animate-fadeIn ${tagColorClass}`}>
+                {item}
+                <button 
+                    onClick={() => onRemove(item)} 
+                    className="hover:bg-black/10 rounded-full p-0.5 transition-colors"
+                >
+                  <X size={12} />
+                </button>
+              </span>
+            ))}
+          </div>
+      )}
+
+      {/* Add Button with Hidden Select */}
+      {availableOptions.length > 0 ? (
+        <div className="relative group">
+          <select
+            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+            value=""
+            onChange={(e) => {
+              if (e.target.value) onAdd(e.target.value);
+            }}
+          >
+            <option value="" disabled>เลือกรายการ...</option>
+            {availableOptions.map((opt) => (
+              <option key={opt} value={opt}>{opt}</option>
+            ))}
+          </select>
+          <button className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-bold border border-dashed transition-all whitespace-nowrap ${btnColorClass}`}>
+            <Plus size={14} /> {btnLabel}
+          </button>
+        </div>
+      ) : (
+         <span className="text-[10px] text-gray-400 italic">เลือกครบทุกรายการแล้ว</span>
+      )}
+    </div>
+  );
+};
+
+// --- Main Component ---
+
+const AdminSettings: React.FC<Props> = ({ 
+  isOpen, onClose, employees, setEmployees, sectionWeights, setSectionWeights, users, setUsers, evaluations, setEvaluations
+}) => {
+  const [activeTab, setActiveTab] = useState<'employees' | 'weights' | 'users' | 'backup'>('employees');
   const [localEmployees, setLocalEmployees] = useState(employees);
   const [localWeights, setLocalWeights] = useState(sectionWeights);
   const [localUsers, setLocalUsers] = useState(users);
@@ -95,16 +164,24 @@ const AdminSettings: React.FC<Props> = ({
     allowedDepartments: [],
     allowedPositions: []
   });
+  
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Derive unique departments from employee list for permissions
+  useEffect(() => {
+    if (isOpen) {
+        setLocalEmployees(employees);
+        setLocalWeights(sectionWeights);
+        setLocalUsers(users);
+    }
+  }, [isOpen, employees, sectionWeights, users]);
+
   const allDepartments = useMemo(() => {
     return Array.from(new Set(localEmployees.map(e => e.jobType).filter(Boolean)));
   }, [localEmployees]);
 
-  // Derive unique positions from POSITION_KPI_MAP
   const allPositions = useMemo(() => {
-    return Object.keys(POSITION_KPI_MAP);
-  }, []);
+    return Array.from(new Set(localEmployees.map(e => e.position).filter(Boolean))).sort();
+  }, [localEmployees]);
 
   if (!isOpen) return null;
 
@@ -113,6 +190,84 @@ const AdminSettings: React.FC<Props> = ({
     setSectionWeights(localWeights);
     setUsers(localUsers);
     onClose();
+  };
+
+  const handleResetData = () => {
+    if (window.confirm('คุณแน่ใจหรือไม่ที่จะ "คืนค่าเริ่มต้น" ทั้งหมด? ข้อมูลพนักงาน, ผู้ใช้งาน และคะแนนที่ประเมินไว้ทั้งหมดจะหายไป และระบบจะรีเฟรชหน้าจอ')) {
+        localStorage.removeItem('kpi_employees');
+        localStorage.removeItem('kpi_weights');
+        localStorage.removeItem('kpi_users');
+        localStorage.removeItem('kpi_evaluations');
+        window.location.reload();
+    }
+  };
+
+  // --- Export / Import Handlers ---
+  const handleExportData = () => {
+    const dataToExport = {
+        employees: localEmployees,
+        weights: localWeights,
+        users: localUsers,
+        evaluations: evaluations, 
+        exportedAt: new Date().toISOString()
+    };
+    
+    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(dataToExport));
+    const downloadAnchorNode = document.createElement('a');
+    downloadAnchorNode.setAttribute("href", dataStr);
+    downloadAnchorNode.setAttribute("download", `kpi_system_backup_${new Date().toISOString().slice(0,10)}.json`);
+    document.body.appendChild(downloadAnchorNode); 
+    downloadAnchorNode.click();
+    downloadAnchorNode.remove();
+  };
+
+  const handleImportClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const fileObj = event.target.files && event.target.files[0];
+    if (!fileObj) {
+        return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        try {
+            const content = e.target?.result as string;
+            const parsedData = JSON.parse(content);
+            
+            if (parsedData.employees && parsedData.users && parsedData.weights && parsedData.evaluations !== undefined) {
+                const evalCount = Object.keys(parsedData.evaluations).length;
+                const confirmMsg = `พบข้อมูลเมื่อวันที่: ${new Date(parsedData.exportedAt).toLocaleString()}\n\n` +
+                                   `- พนักงาน: ${parsedData.employees.length} คน\n` +
+                                   `- ผู้ใช้งาน: ${parsedData.users.length} คน\n` +
+                                   `- ผลการประเมินที่บันทึกไว้: ${evalCount} รายการ\n\n` +
+                                   `ต้องการนำเข้าและ "ทับข้อมูลปัจจุบันทั้งหมด" หรือไม่?`;
+
+                if(window.confirm(confirmMsg)) {
+                    setLocalEmployees(parsedData.employees);
+                    setLocalUsers(parsedData.users);
+                    setLocalWeights(parsedData.weights);
+                    
+                    setEmployees(parsedData.employees);
+                    setUsers(parsedData.users);
+                    setSectionWeights(parsedData.weights);
+                    setEvaluations(parsedData.evaluations);
+                    
+                    alert("นำเข้าข้อมูลเรียบร้อยแล้ว!");
+                    onClose(); 
+                }
+            } else {
+                alert("รูปแบบไฟล์ไม่ถูกต้อง กรุณาใช้ไฟล์ที่ Export มาจากระบบนี้เท่านั้น");
+            }
+        } catch (err) {
+            console.error(err);
+            alert("เกิดข้อผิดพลาดในการอ่านไฟล์");
+        }
+        if (fileInputRef.current) fileInputRef.current.value = "";
+    };
+    reader.readAsText(fileObj);
   };
 
   // Employee Handlers
@@ -161,24 +316,15 @@ const AdminSettings: React.FC<Props> = ({
     setLocalUsers(updated);
   };
 
-  const toggleUserPositionPermission = (index: number, position: string) => {
+  const toggleUserPositionPermission = (index: number, pos: string) => {
     const updated = [...localUsers];
     const user = updated[index];
+    const currentPositions = user.allowedPositions || [];
     
-    if (!user.allowedPositions) user.allowedPositions = [];
-    
-    if (position === 'ALL') {
-       if (user.allowedPositions.includes('ALL')) {
-           user.allowedPositions = []; 
-       } else {
-           user.allowedPositions = ['ALL']; 
-       }
+    if (currentPositions.includes(pos)) {
+        user.allowedPositions = currentPositions.filter(p => p !== pos);
     } else {
-        if (user.allowedPositions.includes(position)) {
-            user.allowedPositions = user.allowedPositions.filter(p => p !== position);
-        } else {
-            user.allowedPositions = [...user.allowedPositions.filter(p => p !== 'ALL'), position];
-        }
+        user.allowedPositions = [...currentPositions, pos];
     }
     setLocalUsers(updated);
   };
@@ -214,23 +360,15 @@ const AdminSettings: React.FC<Props> = ({
     setNewUser({ ...newUser, allowedDepartments: updatedDepts });
   };
 
-  const toggleNewUserPositionPermission = (position: string) => {
-    let updatedPositions = [...newUser.allowedPositions!];
-    if (position === 'ALL') {
-       if (updatedPositions.includes('ALL')) {
-           updatedPositions = []; 
-       } else {
-           updatedPositions = ['ALL']; 
-       }
-    } else {
-        if (updatedPositions.includes(position)) {
-            updatedPositions = updatedPositions.filter(p => p !== position);
-        } else {
-            updatedPositions = [...updatedPositions.filter(p => p !== 'ALL'), position];
-        }
-    }
-    setNewUser({ ...newUser, allowedPositions: updatedPositions });
-  };
+  const toggleNewUserPositionPermission = (pos: string) => {
+     let currentPositions = newUser.allowedPositions || [];
+     if (currentPositions.includes(pos)) {
+        currentPositions = currentPositions.filter(p => p !== pos);
+     } else {
+        currentPositions = [...currentPositions, pos];
+     }
+     setNewUser({ ...newUser, allowedPositions: currentPositions });
+  }
 
   const confirmAddUser = () => {
     if (!newUser.username.trim() || !newUser.password.trim()) {
@@ -257,7 +395,7 @@ const AdminSettings: React.FC<Props> = ({
 
   return (
     <>
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-fadeIn">
         <div className="bg-white rounded-xl shadow-2xl w-full max-w-5xl max-h-[90vh] flex flex-col overflow-hidden">
           
           {/* Header */}
@@ -270,36 +408,44 @@ const AdminSettings: React.FC<Props> = ({
             </button>
           </div>
 
-          {/* Tabs */}
-          <div className="flex border-b border-gray-300 bg-gray-50">
+          {/* Tabs Navigation */}
+          <div className="flex border-b border-gray-300 bg-gray-50 overflow-x-auto shrink-0">
             <button 
               onClick={() => setActiveTab('employees')}
-              className={`px-6 py-3 font-bold text-sm transition-colors border-b-2 ${activeTab === 'employees' ? 'text-black border-primary bg-white' : 'text-black/60 border-transparent hover:text-black hover:bg-gray-100'}`}
+              className={`px-4 md:px-6 py-3 font-bold text-xs md:text-sm whitespace-nowrap transition-colors border-b-2 ${activeTab === 'employees' ? 'text-black border-primary bg-white' : 'text-black/60 border-transparent hover:text-black hover:bg-gray-100'}`}
             >
               จัดการข้อมูลพนักงาน
             </button>
             <button 
               onClick={() => setActiveTab('users')}
-              className={`px-6 py-3 font-bold text-sm transition-colors border-b-2 ${activeTab === 'users' ? 'text-black border-primary bg-white' : 'text-black/60 border-transparent hover:text-black hover:bg-gray-100'}`}
+              className={`px-4 md:px-6 py-3 font-bold text-xs md:text-sm whitespace-nowrap transition-colors border-b-2 ${activeTab === 'users' ? 'text-black border-primary bg-white' : 'text-black/60 border-transparent hover:text-black hover:bg-gray-100'}`}
             >
-              จัดการผู้ใช้งาน (User Management)
+              จัดการผู้ใช้งาน
             </button>
             <button 
               onClick={() => setActiveTab('weights')}
-              className={`px-6 py-3 font-bold text-sm transition-colors border-b-2 ${activeTab === 'weights' ? 'text-black border-primary bg-white' : 'text-black/60 border-transparent hover:text-black hover:bg-gray-100'}`}
+              className={`px-4 md:px-6 py-3 font-bold text-xs md:text-sm whitespace-nowrap transition-colors border-b-2 ${activeTab === 'weights' ? 'text-black border-primary bg-white' : 'text-black/60 border-transparent hover:text-black hover:bg-gray-100'}`}
             >
-              กำหนดน้ำหนักคะแนน
+              กำหนดน้ำหนัก
+            </button>
+            <button 
+              onClick={() => setActiveTab('backup')}
+              className={`px-4 md:px-6 py-3 font-bold text-xs md:text-sm whitespace-nowrap transition-colors border-b-2 ${activeTab === 'backup' ? 'text-black border-primary bg-white' : 'text-black/60 border-transparent hover:text-black hover:bg-gray-100'}`}
+            >
+              <div className="flex items-center gap-1">
+                 <FileJson size={14} /> สำรอง/กู้คืนข้อมูล
+              </div>
             </button>
           </div>
 
           {/* Content */}
-          <div className="flex-1 overflow-y-auto p-6 bg-white">
+          <div className="flex-1 overflow-y-auto p-6 bg-white min-h-0">
             
             {/* --- TAB 1: EMPLOYEES --- */}
             {activeTab === 'employees' && (
-              <div className="space-y-4">
+              <div className="space-y-4 animate-fadeIn">
                 <div className="flex justify-between items-center">
-                  <p className="text-sm text-black">สามารถแก้ไข รหัส, ชื่อ, แผนก, ตำแหน่ง ได้โดยตรงจากตาราง (กดรูปถังขยะค้าง 5 วินาทีเพื่อลบ)</p>
+                  <p className="text-sm text-black">สามารถแก้ไข รหัส, ชื่อ, แผนก, ตำแหน่ง ได้โดยตรงจากตาราง (กดรูปถังขยะค้าง 2 วินาทีเพื่อลบ)</p>
                   <button onClick={handleAddEmployee} className="flex items-center gap-2 bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-green-700 shadow-sm transition-colors">
                     <Plus size={16} /> เพิ่มพนักงาน
                   </button>
@@ -364,11 +510,11 @@ const AdminSettings: React.FC<Props> = ({
 
             {/* --- TAB 2: USERS --- */}
             {activeTab === 'users' && (
-              <div className="space-y-6">
+              <div className="space-y-6 animate-fadeIn">
                 <div className="flex justify-between items-center">
                   <div className="flex items-center gap-2 text-black">
                       <Shield className="text-primary" />
-                      <span className="font-bold">จัดการผู้ใช้งานและสิทธิ์การเข้าถึง (User Permissions)</span>
+                      <span className="font-bold">จัดการผู้ใช้งานและสิทธิ์การเข้าถึง</span>
                   </div>
                   <button onClick={startAddUser} className="flex items-center gap-2 bg-primary text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-blue-700 shadow-sm transition-colors">
                       <Plus size={16} /> เพิ่มผู้ใช้งาน (Add User)
@@ -408,16 +554,17 @@ const AdminSettings: React.FC<Props> = ({
                         </div>
 
                         {/* Permissions */}
-                        <div className="flex-[2]">
-                          <div className="flex items-center justify-between mb-3">
-                              <div className="flex items-center gap-2 text-black font-bold">
-                                  <Shield size={18} className="text-black" />
-                                  สิทธิ์การเข้าถึงแผนก (Visible Departments)
-                              </div>
-                              <div className="flex gap-2">
+                        <div className="flex-[2] space-y-4">
+                          {/* Department Permissions */}
+                          <div>
+                            <div className="flex items-center justify-between mb-2">
+                                <div className="flex items-center gap-2 text-black font-bold text-sm">
+                                    <Shield size={16} className="text-black" />
+                                    แผนก (Departments)
+                                </div>
                                 <button 
                                     onClick={() => toggleUserPermission(idx, 'ALL')}
-                                    className={`px-3 py-1 rounded-full text-xs font-bold transition-all border ${
+                                    className={`px-3 py-0.5 rounded-full text-[10px] font-bold transition-all border ${
                                       user.allowedDepartments.includes('ALL') 
                                       ? 'bg-green-600 text-white border-green-600 shadow-sm' 
                                       : 'bg-white text-black border-gray-300 hover:border-green-500 hover:text-green-600'
@@ -425,68 +572,48 @@ const AdminSettings: React.FC<Props> = ({
                                 >
                                     เข้าถึงทุกแผนก (Admin)
                                 </button>
-                              </div>
-                          </div>
-                          
-                          <div className="p-3 bg-gray-50 rounded-lg border border-gray-200">
-                              {user.allowedDepartments.includes('ALL') ? (
-                                <div className="text-green-700 font-medium text-sm flex items-center gap-2">
-                                    <Check size={16} /> ผู้ใช้งานนี้เป็น Admin สามารถเข้าถึงข้อมูลได้ทุกแผนก
-                                </div>
-                              ) : (
-                                <div className="flex flex-wrap gap-2">
-                                    {allDepartments.map((dept) => {
-                                      const isSelected = user.allowedDepartments.includes(dept);
-                                      return (
-                                          <button
-                                            key={dept}
-                                            onClick={() => toggleUserPermission(idx, dept)}
-                                            className={`px-3 py-1.5 rounded text-xs font-medium transition-all border select-none ${
-                                                isSelected
-                                                ? 'bg-blue-100 text-blue-800 border-blue-300 shadow-sm'
-                                                : 'bg-white text-black border-gray-300 hover:border-gray-400'
-                                            }`}
-                                          >
-                                            {dept}
-                                          </button>
-                                      );
-                                    })}
-                                    {allDepartments.length === 0 && <span className="text-gray-500 text-sm italic">ไม่มีข้อมูลแผนกในระบบ</span>}
-                                </div>
-                              )}
-                          </div>
-
-                          {/* Position Permissions */}
-                          <div className="space-y-2">
-                            <label className="text-sm font-bold text-gray-700">สิทธิ์การประเมินตำแหน่ง</label>
-                            <div className="p-3 bg-gray-50 rounded-lg border border-gray-200">
-                                {user.allowedPositions && user.allowedPositions.includes('ALL') ? (
-                                  <div className="text-green-700 font-medium text-sm flex items-center gap-2">
-                                      <Check size={16} /> ผู้ใช้งานนี้เป็น Admin สามารถประเมินได้ทุกตำแหน่ง
+                            </div>
+                            
+                            <div className="p-2 bg-gray-50 rounded-lg border border-gray-200 min-h-[50px]">
+                                {user.allowedDepartments.includes('ALL') ? (
+                                  <div className="text-green-700 font-medium text-xs flex items-center gap-2 h-full">
+                                      <Check size={14} /> เป็น Admin เข้าถึงได้ทุกแผนกและตำแหน่ง
                                   </div>
                                 ) : (
-                                  <div className="flex flex-wrap gap-2">
-                                      {allPositions.map((position) => {
-                                        const isSelected = user.allowedPositions && user.allowedPositions.includes(position);
-                                        return (
-                                            <button
-                                              key={position}
-                                              onClick={() => toggleUserPositionPermission(idx, position)}
-                                              className={`px-3 py-1.5 rounded text-xs font-medium transition-all border select-none ${
-                                                  isSelected
-                                                  ? 'bg-blue-100 text-blue-800 border-blue-300 shadow-sm'
-                                                  : 'bg-white text-black border-gray-300 hover:border-gray-400'
-                                              }`}
-                                            >
-                                              {position}
-                                            </button>
-                                        );
-                                      })}
-                                      {allPositions.length === 0 && <span className="text-gray-500 text-sm italic">ไม่มีข้อมูลตำแหน่งในระบบ</span>}
-                                  </div>
+                                  <PermissionSelector
+                                    selected={user.allowedDepartments}
+                                    options={allDepartments}
+                                    onAdd={(val) => toggleUserPermission(idx, val)}
+                                    onRemove={(val) => toggleUserPermission(idx, val)}
+                                    tagColorClass="bg-blue-100 text-blue-800 border-blue-200"
+                                    btnColorClass="text-blue-600 border-blue-300 hover:bg-blue-50"
+                                    btnLabel="เพิ่มสิทธิ์แผนก"
+                                  />
                                 )}
                             </div>
                           </div>
+
+                          {/* Position Permissions (Only if not Admin/ALL) */}
+                          {!user.allowedDepartments.includes('ALL') && (
+                              <div>
+                                <div className="flex items-center gap-2 text-black font-bold text-sm mb-2">
+                                    <Briefcase size={16} className="text-black" />
+                                    ตำแหน่งเฉพาะ (Specific Positions)
+                                </div>
+                                <div className="p-2 bg-yellow-50/50 rounded-lg border border-yellow-200 min-h-[50px]">
+                                    <PermissionSelector
+                                      selected={user.allowedPositions || []}
+                                      options={allPositions}
+                                      onAdd={(val) => toggleUserPositionPermission(idx, val)}
+                                      onRemove={(val) => toggleUserPositionPermission(idx, val)}
+                                      tagColorClass="bg-amber-100 text-amber-800 border-amber-200"
+                                      btnColorClass="text-amber-600 border-amber-300 hover:bg-amber-50"
+                                      btnLabel="เพิ่มสิทธิ์ตำแหน่ง"
+                                    />
+                                </div>
+                              </div>
+                          )}
+
                         </div>
                       </div>
 
@@ -505,7 +632,7 @@ const AdminSettings: React.FC<Props> = ({
 
             {/* --- TAB 3: WEIGHTS --- */}
             {activeTab === 'weights' && (
-              <div className="max-w-lg mx-auto bg-white p-8 rounded-lg shadow-sm border border-gray-300">
+              <div className="max-w-lg mx-auto bg-white p-8 rounded-lg shadow-sm border border-gray-300 animate-fadeIn">
                 <h3 className="font-bold text-lg mb-6 text-black border-b border-gray-200 pb-2">กำหนดน้ำหนักคะแนนรวม (Total Score Weights)</h3>
                 
                 <div className="space-y-6">
@@ -561,22 +688,90 @@ const AdminSettings: React.FC<Props> = ({
               </div>
             )}
 
+            {/* --- TAB 4: BACKUP & RESTORE --- */}
+            {activeTab === 'backup' && (
+                <div className="max-w-2xl mx-auto space-y-8 animate-fadeIn">
+                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-6">
+                        <div className="flex items-center gap-3 mb-4">
+                            <div className="bg-blue-100 p-2 rounded-full text-blue-600">
+                                <Download size={24} />
+                            </div>
+                            <div>
+                                <h3 className="text-lg font-bold text-black">1. ส่งออกข้อมูล (Export)</h3>
+                                <p className="text-sm text-gray-600">ดาวน์โหลดไฟล์การตั้งค่าเก็บไว้ หรือส่งให้เครื่องอื่น</p>
+                            </div>
+                        </div>
+                        <p className="text-sm text-gray-700 mb-4">
+                            ใช้สำหรับบันทึกข้อมูลพนักงาน, ผู้ใช้งาน, และ <b>ผลการประเมินคะแนนทั้งหมด</b> เป็นไฟล์ .json เพื่อสำรองข้อมูล หรือนำไปใช้ในเครื่องอื่น
+                        </p>
+                        <button 
+                            onClick={handleExportData}
+                            className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-bold shadow-sm transition-colors flex justify-center items-center gap-2"
+                        >
+                            <Download size={18} /> ดาวน์โหลดไฟล์ (.json)
+                        </button>
+                    </div>
+
+                    <div className="bg-amber-50 border border-amber-200 rounded-lg p-6">
+                        <div className="flex items-center gap-3 mb-4">
+                            <div className="bg-amber-100 p-2 rounded-full text-amber-600">
+                                <Upload size={24} />
+                            </div>
+                            <div>
+                                <h3 className="text-lg font-bold text-black">2. นำเข้าข้อมูล (Import)</h3>
+                                <p className="text-sm text-gray-600">นำไฟล์ .json จากเครื่องอื่นมาใช้ที่เครื่องนี้</p>
+                            </div>
+                        </div>
+                        <p className="text-sm text-gray-700 mb-4">
+                            <span className="font-bold text-red-600">คำเตือน:</span> ข้อมูลเดิมในเครื่องนี้จะถูกแทนที่ด้วยข้อมูลใหม่จากไฟล์ทั้งหมด (รวมถึงคะแนนที่เคยประเมินไว้) กรุณาตรวจสอบให้แน่ใจก่อนดำเนินการ
+                        </p>
+                        <input 
+                            type="file" 
+                            ref={fileInputRef} 
+                            onChange={handleFileChange} 
+                            accept=".json" 
+                            className="hidden" 
+                        />
+                        <button 
+                            onClick={handleImportClick}
+                            className="w-full py-3 bg-amber-500 hover:bg-amber-600 text-white rounded-lg font-bold shadow-sm transition-colors flex justify-center items-center gap-2"
+                        >
+                            <Upload size={18} /> เลือกไฟล์เพื่อนำเข้า
+                        </button>
+                    </div>
+
+                    <div className="text-center text-xs text-gray-400 mt-8">
+                        ระบบ Export/Import นี้ใช้สำหรับการถ่ายโอนข้อมูลระหว่างเครื่อง เนื่องจากระบบทำงานแบบ Offline (Client-side)
+                    </div>
+                </div>
+            )}
+
           </div>
 
           {/* Footer Actions */}
-          <div className="bg-white p-4 border-t border-gray-300 flex justify-end gap-3">
-            <button 
-              onClick={onClose}
-              className="px-6 py-2 rounded-lg border border-gray-300 text-black font-bold hover:bg-gray-100 transition-colors"
+          <div className="bg-white p-4 border-t border-gray-300 flex justify-between items-center gap-3 shrink-0">
+             <button 
+              onClick={handleResetData}
+              className="px-4 py-2 rounded-lg text-red-600 font-bold hover:bg-red-50 transition-colors text-xs flex items-center gap-2 border border-red-100"
+              title="ล้างข้อมูลทั้งหมดที่บันทึกไว้ในเครื่องนี้และกลับไปใช้ค่าเริ่มต้น"
             >
-              ยกเลิก
+              <RefreshCw size={14} /> คืนค่าเริ่มต้น (Reset Factory)
             </button>
-            <button 
-              onClick={handleSave}
-              className="px-6 py-2 rounded-lg bg-primary text-white font-bold hover:bg-blue-800 transition-colors flex items-center gap-2 shadow-md"
-            >
-              <Save size={18} /> บันทึกการเปลี่ยนแปลง
-            </button>
+
+            <div className="flex gap-3">
+              <button 
+                onClick={onClose}
+                className="px-6 py-2 rounded-lg border border-gray-300 text-black font-bold hover:bg-gray-100 transition-colors"
+              >
+                ปิดหน้าต่าง
+              </button>
+              <button 
+                onClick={handleSave}
+                className="px-6 py-2 rounded-lg bg-primary text-white font-bold hover:bg-blue-800 transition-colors flex items-center gap-2 shadow-md"
+              >
+                <Save size={18} /> บันทึกและใช้งาน
+              </button>
+            </div>
           </div>
 
         </div>
@@ -625,7 +820,7 @@ const AdminSettings: React.FC<Props> = ({
 
               <div className="space-y-3">
                  <div className="flex justify-between items-center border-b pb-2 mb-2">
-                    <h4 className="font-bold text-gray-800">สิทธิ์การมองเห็นแผนก (Permissions)</h4>
+                    <h4 className="font-bold text-gray-800">สิทธิ์การมองเห็น (Permissions)</h4>
                     <button 
                       onClick={() => toggleNewUserPermission('ALL')}
                       className={`px-3 py-1 rounded-full text-xs font-bold transition-all border ${
@@ -643,77 +838,41 @@ const AdminSettings: React.FC<Props> = ({
                       <Check size={18} /> ผู้ใช้งานนี้จะเป็น Admin (เห็นข้อมูลทั้งหมด)
                     </div>
                  ) : (
-                    <div className="flex flex-wrap gap-2 p-4 bg-gray-50 rounded-lg border border-gray-200">
-                      {allDepartments.length > 0 ? allDepartments.map((dept) => {
-                          const isSelected = newUser.allowedDepartments.includes(dept);
-                          return (
-                              <button
-                                key={dept}
-                                onClick={() => toggleNewUserPermission(dept)}
-                                className={`px-3 py-1.5 rounded text-sm font-medium transition-all border ${
-                                    isSelected
-                                    ? 'bg-blue-100 text-blue-800 border-blue-300'
-                                    : 'bg-white text-gray-600 border-gray-300 hover:border-gray-400'
-                                }`}
-                              >
-                                {dept}
-                              </button>
-                          );
-                      }) : (
-                        <div className="text-gray-400 text-sm italic w-full text-center py-2 flex items-center justify-center gap-2">
-                           <AlertCircle size={16} /> ไม่มีข้อมูลแผนกในระบบ (กรุณาเพิ่มพนักงานก่อน)
+                    <div className="space-y-4">
+                        {/* Departments */}
+                        <div>
+                            <p className="text-xs font-bold text-gray-700 mb-2">แผนก (Departments)</p>
+                            <div className="p-2 bg-gray-50 rounded-lg border border-gray-200 min-h-[50px]">
+                                <PermissionSelector
+                                  selected={newUser.allowedDepartments}
+                                  options={allDepartments}
+                                  onAdd={(val) => toggleNewUserPermission(val)}
+                                  onRemove={(val) => toggleNewUserPermission(val)}
+                                  tagColorClass="bg-blue-100 text-blue-800 border-blue-200"
+                                  btnColorClass="text-blue-600 border-blue-300 hover:bg-blue-50"
+                                  btnLabel="เพิ่มสิทธิ์แผนก"
+                                />
+                            </div>
                         </div>
-                      )}
-                    </div>
-                 )}
-                 <p className="text-xs text-gray-500 mt-2">* เลือกแผนกที่ต้องการให้ผู้ใช้งานนี้มองเห็นและจัดการได้</p>
-              </div>
 
-              {/* Position Permissions */}
-              <div className="space-y-3">
-                 <label className="block text-sm font-bold text-gray-700">สิทธิ์การประเมินตำแหน่ง</label>
-                 <div className="flex gap-2">
-                    <button
-                      onClick={() => toggleNewUserPositionPermission('ALL')}
-                      className={`px-4 py-2 rounded-lg font-medium border transition-all ${
-                        newUser.allowedPositions!.includes('ALL') 
-                        ? 'bg-green-100 text-green-800 border-green-300'
-                        : 'bg-white text-gray-500 border-gray-300 hover:border-green-500'
-                      }`}
-                    >
-                      เข้าถึงทุกตำแหน่ง (Admin)
-                    </button>
-                 </div>
-                 
-                 {newUser.allowedPositions!.includes('ALL') ? (
-                    <div className="p-4 bg-green-50 text-green-800 rounded-lg flex items-center justify-center gap-2 font-bold text-sm">
-                      <Check size={18} /> ผู้ใช้งานนี้จะเป็น Admin (เห็นข้อมูลทั้งหมด)
-                    </div>
-                 ) : (
-                    <div className="flex flex-wrap gap-2 p-4 bg-gray-50 rounded-lg border border-gray-200">
-                      {allPositions.length > 0 ? allPositions.map((position) => {
-                          const isSelected = newUser.allowedPositions!.includes(position);
-                          return (
-                              <button
-                                key={position}
-                                onClick={() => toggleNewUserPositionPermission(position)}
-                                className={`px-3 py-1.5 rounded text-sm font-medium transition-all border ${
-                                    isSelected
-                                    ? 'bg-blue-100 text-blue-800 border-blue-300'
-                                    : 'bg-white text-gray-600 border-gray-300 hover:border-gray-400'
-                                }`}
-                              >
-                                {position}
-                              </button>
-                          );
-                      }) : (
-                        <div className="text-gray-400 text-sm italic w-full text-center py-2 flex items-center justify-center gap-2">
-                           <AlertCircle size={16} /> ไม่มีข้อมูลตำแหน่งในระบบ
+                        {/* Positions */}
+                        <div>
+                            <p className="text-xs font-bold text-gray-700 mb-2">ตำแหน่งเฉพาะ (Specific Positions)</p>
+                            <div className="p-2 bg-yellow-50 rounded-lg border border-yellow-200 min-h-[50px]">
+                                <PermissionSelector
+                                  selected={newUser.allowedPositions || []}
+                                  options={allPositions}
+                                  onAdd={(val) => toggleNewUserPositionPermission(val)}
+                                  onRemove={(val) => toggleNewUserPositionPermission(val)}
+                                  tagColorClass="bg-amber-100 text-amber-800 border-amber-200"
+                                  btnColorClass="text-amber-600 border-amber-300 hover:bg-amber-50"
+                                  btnLabel="เพิ่มสิทธิ์ตำแหน่ง"
+                                />
+                            </div>
                         </div>
-                      )}
                     </div>
                  )}
-                 <p className="text-xs text-gray-500 mt-2">* เลือกตำแหน่งที่ต้องการให้ผู้ใช้งานนี้ประเมินได้</p>
+                 <p className="text-[10px] text-gray-500 mt-2">* เลือกแผนก หรือ ตำแหน่งที่ต้องการให้ผู้ใช้งานนี้มองเห็น</p>
               </div>
             </div>
 
